@@ -40,17 +40,38 @@ AI  --git status-->  shell  -->  git           AI  --git status-->  zap  -->  gi
 
 ## Installation
 
-### Build from source (recommended)
+### Prerequisites
 
-You need [Rust](https://www.rust-lang.org/tools/install) installed.
+> **⚠️ Rust toolchain is required.** Zap is a Rust binary you build from source.
+> If you don't already have Rust installed, install it first (takes ~2 minutes):
 
 ```bash
-git clone <your-repo-url> zap
+# Install Rust via rustup (official installer)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Activate it in the current shell (only needed for this terminal session)
+source "$HOME/.cargo/env"
+
+# Verify
+cargo --version    # should print: cargo 1.xx.x
+```
+
+When the rustup installer asks, just press **Enter** to accept the default options. It installs to `~/.cargo` and `~/.rustup` — no `sudo` needed, nothing system-wide.
+
+Already have Rust? Make sure it's reasonably current:
+```bash
+rustup update stable
+```
+
+### Build & install Zap
+
+```bash
+git clone https://github.com/bitan-del/zap.git
 cd zap
 cargo install --path .
 ```
 
-This puts the `zap` binary in `~/.cargo/bin/`. Make sure that's on your `PATH`:
+This compiles Zap in release mode (~1–2 minutes first time) and puts the `zap` binary in `~/.cargo/bin/`. Make sure that's on your `PATH`:
 
 ```bash
 echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
@@ -60,10 +81,19 @@ source ~/.zshrc
 ### Verify
 
 ```bash
-zap --version
+zap --version       # → zap 0.1.0
 zap --help
 zap git status      # inside any git repo
 ```
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `command not found: cargo` | Run `source "$HOME/.cargo/env"` or restart your terminal |
+| `command not found: zap` after install | `export PATH="$HOME/.cargo/bin:$PATH"` |
+| `cargo install` fails with compiler errors | `rustup update stable` to update Rust |
+| Build is slow first time | Normal (~2 min). Subsequent builds are seconds. |
 
 ---
 
