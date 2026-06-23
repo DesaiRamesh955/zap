@@ -201,6 +201,17 @@ rtk grep <pattern>      # Search grouped by file (75%). Format flags (-c, -l, -L
 rtk find <pattern>      # Find grouped by directory (70%)
 ```
 
+### Research protocol — read less, drill in
+Route research/reading through zap so big files don't flood the context:
+```bash
+zap read <file> --overview        # signatures/headings + line numbers (LOSSY map — never edit from this)
+zap read <file> --symbol <name>   # exact body of one symbol (lossless)
+zap read <file> --lines A-B       # exact line range, e.g. 40-80 (lossless)
+```
+- Research / reading docs: start with `--overview`, then pull only the `--symbol`/`--lines` you need.
+- Editing: orient with `--overview`, then read **only** the target range before editing — never edit from an overview.
+- A plain read of a large file prints a hint suggesting `--overview`.
+
 ### Analysis & Debug (70-90% savings)
 ```bash
 rtk err <cmd>           # Filter errors only from any command
@@ -3054,7 +3065,11 @@ fn cursor_hook_already_present(root: &serde_json::Value) -> bool {
         entry
             .get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|cmd| cmd.contains(REWRITE_HOOK_FILE) || cmd == CURSOR_HOOK_COMMAND || cmd == LEGACY_CURSOR_HOOK_COMMAND)
+            .is_some_and(|cmd| {
+                cmd.contains(REWRITE_HOOK_FILE)
+                    || cmd == CURSOR_HOOK_COMMAND
+                    || cmd == LEGACY_CURSOR_HOOK_COMMAND
+            })
     })
 }
 
@@ -3228,7 +3243,11 @@ fn remove_cursor_hook_from_json(root: &mut serde_json::Value) -> bool {
         !entry
             .get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|cmd| cmd.contains(REWRITE_HOOK_FILE) || cmd == CURSOR_HOOK_COMMAND || cmd == LEGACY_CURSOR_HOOK_COMMAND)
+            .is_some_and(|cmd| {
+                cmd.contains(REWRITE_HOOK_FILE)
+                    || cmd == CURSOR_HOOK_COMMAND
+                    || cmd == LEGACY_CURSOR_HOOK_COMMAND
+            })
     });
 
     pre_tool_use.len() < original_len

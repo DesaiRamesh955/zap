@@ -565,6 +565,54 @@ impl Tracker {
         self.get_summary_filtered(None) // delegate to filtered variant
     }
 
+    /// Compact stats for the live status line: `(saved_tokens, fallback_count)` for
+    /// **today** in the **current project**. Saved tokens are an estimate (see
+    /// [`estimate_tokens`]); fallbacks are surfaced so zero-savings runs stay visible.
+    pub fn get_statusline_stats(&self) -> Result<(i64, i64)> {
+        let project = current_project_path_string();
+        let project = (!project.is_empty()).then_some(project);
+        let (project_exact, project_glob) = project_filter_params(project.as_deref());
+        let like = format!("{}%", Utc::now().format("%Y-%m-%d"));
+
+        let saved: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(saved_tokens), 0) FROM commands
+             WHERE timestamp LIKE ?1 AND (?2 IS NULL OR project_path = ?2 OR project_path GLOB ?3)",
+            params![like, project_exact, project_glob],
+            |r| r.get(0),
+        )?;
+        let fallbacks: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM commands
+             WHERE timestamp LIKE ?1 AND rtk_cmd LIKE 'rtk fallback:%'
+               AND (?2 IS NULL OR project_path = ?2 OR project_path GLOB ?3)",
+            params![like, project_exact, project_glob],
+            |r| r.get(0),
+        )?;
+        Ok((saved, fallbacks))
+    }
+
+    /// True if a read of this exact `original_cmd` (e.g. `"cat src/main.rs"`) already
+    /// counted a full baseline (`input_tokens > 0`) today in the current project.
+    ///
+    /// Used so a file's full size is credited as "saved" only at its FIRST read of
+    /// the day: an overview followed by `--symbol`/`--lines` drill-ins of the same
+    /// file no longer double-counts that file's baseline.
+    pub fn baseline_counted_today(&self, original_cmd: &str) -> bool {
+        let project = current_project_path_string();
+        let project = (!project.is_empty()).then_some(project);
+        let (project_exact, project_glob) = project_filter_params(project.as_deref());
+        let like = format!("{}%", Utc::now().format("%Y-%m-%d"));
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM commands
+                   WHERE original_cmd = ?1 AND input_tokens > 0 AND timestamp LIKE ?2
+                     AND (?3 IS NULL OR project_path = ?3 OR project_path GLOB ?4))",
+                params![original_cmd, like, project_exact, project_glob],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|exists| exists == 1)
+            .unwrap_or(false)
+    }
+
     /// Get summary statistics filtered by project path. // added
     ///
     /// When `project_path` is `Some`, matches the exact working directory
@@ -1364,6 +1412,31 @@ impl TimedExecution {
                 rtk_cmd,
                 input_tokens,
                 output_tokens,
+                elapsed_ms,
+            );
+        }
+    }
+
+    /// Track a file read, counting the file's full baseline only the FIRST time the
+    /// file is read today (per project). Repeat reads of the same file record a zero
+    /// baseline (saved = 0), so an overview plus later `--symbol`/`--lines` drill-ins
+    /// of the same file never double-count that file's full size as "saved".
+    ///
+    /// `original_cmd` is the dedup key (e.g. `"cat src/main.rs"`) and must be stable
+    /// across read modes of the same file.
+    pub fn track_read_deduped(&self, original_cmd: &str, rtk_cmd: &str, input: &str, output: &str) {
+        let elapsed_ms = self.start.elapsed().as_millis() as u64;
+        if let Ok(tracker) = Tracker::new() {
+            let input_tokens = if tracker.baseline_counted_today(original_cmd) {
+                0 // baseline already banked at this file's first read today
+            } else {
+                estimate_tokens(input)
+            };
+            let _ = tracker.record(
+                original_cmd,
+                rtk_cmd,
+                input_tokens,
+                estimate_tokens(output),
                 elapsed_ms,
             );
         }
