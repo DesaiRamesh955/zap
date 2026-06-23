@@ -1,10 +1,39 @@
 //! Reads source files with optional language-aware filtering to strip boilerplate.
 
+use super::read_view;
 use crate::core::filter::{self, FilterLevel, Language};
 use crate::core::tracking;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+
+/// Selects how `run`/`run_stdin` render a file beyond the legacy filter/window behavior.
+pub enum ViewMode {
+    /// Legacy behavior: full content honoring `level`/`max_lines`/`tail_lines`.
+    Default,
+    /// Lossy navigational overview: signatures/headings with original line numbers.
+    Overview,
+    /// Lossless exact lines (1-based, inclusive).
+    Lines(usize, usize),
+    /// Lossless exact body of a named symbol.
+    Symbol(String),
+}
+
+/// Render a structure-aware view, or `None` for `ViewMode::Default` (legacy path).
+fn render_view(
+    content: &str,
+    lang: &Language,
+    path: &str,
+    mode: &ViewMode,
+) -> Result<Option<String>> {
+    let out = match mode {
+        ViewMode::Default => return Ok(None),
+        ViewMode::Overview => read_view::overview(content, lang, path),
+        ViewMode::Lines(a, b) => read_view::precise_lines(content, *a, *b)?,
+        ViewMode::Symbol(name) => read_view::precise_symbol(content, name)?,
+    };
+    Ok(Some(out))
+}
 
 pub fn run(
     file: &Path,
@@ -12,6 +41,7 @@ pub fn run(
     max_lines: Option<usize>,
     tail_lines: Option<usize>,
     line_numbers: bool,
+    mode: &ViewMode,
     verbose: u8,
 ) -> Result<()> {
     let timer = tracking::TimedExecution::start();
@@ -33,6 +63,14 @@ pub fn run(
 
     if verbose > 1 {
         eprintln!("Detected language: {:?}", lang);
+    }
+
+    // Structure-aware views (overview / precise slices) short-circuit the legacy path.
+    let path_str = file.display().to_string();
+    if let Some(out) = render_view(&content, &lang, &path_str, mode)? {
+        print!("{out}");
+        timer.track_read_deduped(&format!("cat {path_str}"), "rtk read", &content, &out);
+        return Ok(());
     }
 
     // Apply filter
@@ -71,7 +109,14 @@ pub fn run(
         filtered.clone()
     };
     print!("{}", rtk_output);
-    timer.track(
+    if level == FilterLevel::None && read_view::should_overview(&content) {
+        eprintln!(
+            "rtk: large file ({} lines) — for a cheaper map use: zap read {} --overview",
+            content.lines().count(),
+            file.display()
+        );
+    }
+    timer.track_read_deduped(
         &format!("cat {}", file.display()),
         "rtk read",
         &content,
@@ -85,6 +130,7 @@ pub fn run_stdin(
     max_lines: Option<usize>,
     tail_lines: Option<usize>,
     line_numbers: bool,
+    mode: &ViewMode,
     verbose: u8,
 ) -> Result<()> {
     use std::io::{self, Read as IoRead};
@@ -107,6 +153,13 @@ pub fn run_stdin(
 
     if verbose > 1 {
         eprintln!("Language: {:?} (stdin has no extension)", lang);
+    }
+
+    // Structure-aware views short-circuit the legacy path (operate on stdin content).
+    if let Some(out) = render_view(&content, &lang, "-", mode)? {
+        print!("{out}");
+        timer.track("cat - (stdin)", "rtk read -", &content, &out);
+        return Ok(());
     }
 
     // Apply filter
@@ -194,7 +247,15 @@ fn main() {{
         )?;
 
         // Just verify it doesn't panic
-        run(file.path(), FilterLevel::Minimal, None, None, false, 0)?;
+        run(
+            file.path(),
+            FilterLevel::Minimal,
+            None,
+            None,
+            false,
+            &ViewMode::Default,
+            0,
+        )?;
         Ok(())
     }
 
@@ -246,7 +307,11 @@ fn main() {{
         writeln!(f2, "charlie\ndelta").unwrap();
 
         let output = std::process::Command::new(&bin)
-            .args(["read", &f1.path().to_string_lossy(), &f2.path().to_string_lossy()])
+            .args([
+                "read",
+                &f1.path().to_string_lossy(),
+                &f2.path().to_string_lossy(),
+            ])
             .output()
             .expect("failed to run rtk read");
 
@@ -266,15 +331,28 @@ fn main() {{
         writeln!(f1, "valid content").unwrap();
 
         let output = std::process::Command::new(&bin)
-            .args(["read", &f1.path().to_string_lossy(), "/tmp/rtk_nonexistent_file.txt"])
+            .args([
+                "read",
+                &f1.path().to_string_lossy(),
+                "/tmp/rtk_nonexistent_file.txt",
+            ])
             .output()
             .expect("failed to run rtk read");
 
-        assert!(!output.status.success(), "should exit non-zero on missing file");
+        assert!(
+            !output.status.success(),
+            "should exit non-zero on missing file"
+        );
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stdout.contains("valid content"), "valid file should still be printed");
-        assert!(stderr.contains("rtk_nonexistent_file"), "should report missing file on stderr");
+        assert!(
+            stdout.contains("valid content"),
+            "valid file should still be printed"
+        );
+        assert!(
+            stderr.contains("rtk_nonexistent_file"),
+            "should report missing file on stderr"
+        );
     }
 
     #[test]

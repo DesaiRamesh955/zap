@@ -100,12 +100,18 @@ pub fn run(
 
         // added: KPI-style aligned output
         print_kpi("Total commands", summary.total_commands.to_string());
-        print_kpi("Input tokens", format_tokens(summary.total_input));
-        print_kpi("Output tokens", format_tokens(summary.total_output));
+        print_kpi(
+            "Input tokens",
+            format!("~{}", format_tokens(summary.total_input)),
+        );
+        print_kpi(
+            "Output tokens",
+            format!("~{}", format_tokens(summary.total_output)),
+        );
         print_kpi(
             "Tokens saved",
             format!(
-                "{} ({:.1}%)",
+                "~{} ({:.1}%)",
                 format_tokens(summary.total_saved),
                 summary.avg_savings_pct
             ),

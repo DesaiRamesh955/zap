@@ -236,9 +236,23 @@ lazy_static! {
     static ref IMPORT_PATTERN: Regex =
         Regex::new(r"^(use |import |from |require\(|#include)").unwrap();
     static ref FUNC_SIGNATURE: Regex = Regex::new(
-        r"^(pub\s+)?(async\s+)?(fn|def|function|func|class|struct|enum|trait|interface|type)\s+\w+"
+        // Optional visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(in path)`),
+        // then any fn modifiers (`const`/`async`/`unsafe`/`default`/`extern "C"`),
+        // then the declaration keyword and a name.
+        r#"^(pub(\([^)]*\))?\s+)?((const|async|unsafe|default|extern(\s+"[^"]+")?)\s+)*(fn|def|function|func|class|struct|enum|trait|interface|type)\s+\w+"#
     )
     .unwrap();
+}
+
+/// True if `trimmed` (a whitespace-trimmed line) is an import/use/include statement.
+/// Shared with structure-aware views so signature detection has one source of truth.
+pub fn is_import_line(trimmed: &str) -> bool {
+    IMPORT_PATTERN.is_match(trimmed)
+}
+
+/// True if `trimmed` (a whitespace-trimmed line) declares a function/type/class signature.
+pub fn is_signature_line(trimmed: &str) -> bool {
+    FUNC_SIGNATURE.is_match(trimmed)
 }
 
 impl FilterStrategy for AggressiveFilter {
@@ -364,6 +378,27 @@ pub fn smart_truncate(content: &str, max_lines: usize, _lang: &Language) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signature_line_recognizes_visibility_and_modifiers() {
+        // Plain forms (already worked).
+        assert!(is_signature_line("pub fn add(a: i32)"));
+        assert!(is_signature_line("fn helper()"));
+        assert!(is_signature_line("async fn run()"));
+        // Visibility modifiers — previously MISSED (e.g. pub(crate) fn).
+        assert!(is_signature_line("pub(crate) fn check_command_with_rules("));
+        assert!(is_signature_line("pub(super) fn x()"));
+        assert!(is_signature_line("pub(crate) struct Thing {"));
+        // fn modifiers.
+        assert!(is_signature_line("const fn limit() -> usize"));
+        assert!(is_signature_line("pub const fn z()"));
+        assert!(is_signature_line("unsafe fn raw()"));
+        assert!(is_signature_line(r#"extern "C" fn ffi()"#));
+        // Must NOT match a const value, a let binding, or a nameless decl.
+        assert!(!is_signature_line("const MAX: usize = 80;"));
+        assert!(!is_signature_line("let sum = a + b;"));
+        assert!(!is_signature_line("pub struct;"));
+    }
 
     #[test]
     fn test_filter_level_parsing() {

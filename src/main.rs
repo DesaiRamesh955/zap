@@ -21,7 +21,7 @@ use cmds::ruby::{rake_cmd, rspec_cmd, rubocop_cmd};
 use cmds::rust::{cargo_cmd, runner};
 use cmds::system::{
     deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, pipe_cmd,
-    read, summary, tree, wc_cmd,
+    read, read_view, summary, tree, wc_cmd,
 };
 
 use anyhow::{Context, Result};
@@ -108,6 +108,15 @@ enum Commands {
         /// Show line numbers
         #[arg(short = 'n', long)]
         line_numbers: bool,
+        /// Structure overview: signatures/headings + line numbers (lossy, for navigation)
+        #[arg(long)]
+        overview: bool,
+        /// Show only the exact body of this symbol (lossless)
+        #[arg(long, conflicts_with = "lines")]
+        symbol: Option<String>,
+        /// Show only these 1-based lines, e.g. 40-80 (lossless)
+        #[arg(long)]
+        lines: Option<String>,
     },
 
     /// Generate 2-line technical summary (heuristic-based)
@@ -579,6 +588,9 @@ enum Commands {
 
     /// Show Zap adoption across Claude Code sessions
     Session {},
+
+    /// Print one honest status line (tokens saved today + fallbacks) for the status bar
+    Statusline {},
 
     /// Manage telemetry consent and data (RGPD/GDPR)
     Telemetry {
@@ -1141,6 +1153,7 @@ const RTK_META_COMMANDS: &[&str] = &[
     "trust",
     "untrust",
     "session",
+    "statusline",
     "rewrite",
 ];
 
@@ -1388,13 +1401,21 @@ where
     }
 }
 
-/// Retry parsing as a normalized `grep` invocation when the original parse failed.
-/// Returns `Some(cli)` only when the args are a recoverable flags-first `grep`
-/// command that re-parses cleanly; otherwise `None` so the caller falls back.
-fn recover_grep_argv() -> Option<Cli> {
+/// Recover a `grep` invocation clap rejected — flags before the pattern, or flags
+/// like `-l`/`-rl` that clash with zap's own grep options — by parsing the raw args
+/// and dispatching straight to the grep handler, bypassing clap entirely so the
+/// command reaches ripgrep instead of an unfiltered fallback.
+///
+/// Returns `None` when it isn't a recoverable `grep` (different subcommand, or no
+/// identifiable pattern), so the caller falls back as usual.
+fn recover_grep() -> Option<Result<i32>> {
     let argv: Vec<String> = std::env::args().collect();
-    let normalized = grep_cmd::normalize_argv(&argv)?;
-    Cli::try_parse_from(&normalized).ok()
+    // The subcommand is the first non-flag token (all global flags are boolean).
+    let sub_idx = argv.iter().skip(1).position(|a| !a.starts_with('-'))? + 1;
+    if argv.get(sub_idx).map(String::as_str) != Some("grep") {
+        return None;
+    }
+    grep_cmd::run_from_raw_args(&argv[sub_idx + 1..], 0)
 }
 
 fn run_cli() -> Result<i32> {
@@ -1407,13 +1428,12 @@ fn run_cli() -> Result<i32> {
             if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
                 e.exit();
             }
-            // Recover the common `grep -flags pattern [path]` form that clap rejects
-            // (its grep pattern is positional-first). Re-parse the normalized argv so
-            // these hit the optimized handler instead of an unfiltered fallback.
-            match recover_grep_argv() {
-                Some(cli) => cli,
-                None => return run_fallback(e),
+            // Recover `grep` forms clap can't parse (flags-first, or -l/-rl that
+            // clash with zap's grep options) straight through the grep handler.
+            if let Some(result) = recover_grep() {
+                return result;
             }
+            return run_fallback(e);
         }
     };
 
@@ -1442,7 +1462,21 @@ fn run_cli() -> Result<i32> {
             max_lines,
             tail_lines,
             line_numbers,
+            overview,
+            symbol,
+            lines,
         } => {
+            // Resolve the structure-aware view mode (precise slices win over overview).
+            let mode = if let Some(name) = symbol {
+                read::ViewMode::Symbol(name)
+            } else if let Some(spec) = lines {
+                let (a, b) = read_view::parse_line_range(&spec)?;
+                read::ViewMode::Lines(a, b)
+            } else if overview {
+                read::ViewMode::Overview
+            } else {
+                read::ViewMode::Default
+            };
             let mut had_error = false;
             let mut stdin_seen = false;
             for file in &files {
@@ -1452,7 +1486,14 @@ fn run_cli() -> Result<i32> {
                         continue;
                     }
                     stdin_seen = true;
-                    read::run_stdin(level, max_lines, tail_lines, line_numbers, cli.verbose)
+                    read::run_stdin(
+                        level,
+                        max_lines,
+                        tail_lines,
+                        line_numbers,
+                        &mode,
+                        cli.verbose,
+                    )
                 } else {
                     read::run(
                         file,
@@ -1460,6 +1501,7 @@ fn run_cli() -> Result<i32> {
                         max_lines,
                         tail_lines,
                         line_numbers,
+                        &mode,
                         cli.verbose,
                     )
                 };
@@ -2066,6 +2108,11 @@ fn run_cli() -> Result<i32> {
             0
         }
 
+        Commands::Statusline {} => {
+            analytics::statusline_cmd::run(cli.verbose)?;
+            0
+        }
+
         Commands::Telemetry { command } => {
             core::telemetry_cmd::run(&command)?;
             0
@@ -2667,27 +2714,20 @@ mod tests {
     }
 
     #[test]
-    fn test_grep_flags_first_recovers_via_normalize() {
-        // The conventional `grep -rn pattern path` form is rejected by clap
-        // (pattern is positional-first), then recovered by normalize_argv.
-        let argv: Vec<String> = ["rtk", "grep", "-rn", "fn main", "src"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        assert!(
-            Cli::try_parse_from(&argv).is_err(),
-            "flags-first grep should fail clap's strict parse"
-        );
-
-        let normalized = grep_cmd::normalize_argv(&argv).expect("recoverable grep");
-        let cli = Cli::try_parse_from(&normalized).expect("normalized grep parses");
-        match cli.command {
-            Commands::Grep { pattern, path, .. } => {
-                assert_eq!(pattern, "fn main");
-                assert_eq!(path, "src");
-            }
-            _ => panic!("Expected Grep command"),
+    fn test_flags_first_grep_is_rejected_by_clap_then_recovered() {
+        // These conventional grep forms are rejected by clap — pattern is
+        // positional-first, and `-l` collides with zap's `--max-len`. That rejection
+        // is exactly what makes run_cli() call recover_grep(), which dispatches the
+        // raw args straight to the grep handler (parse_grep_args, tested in grep_cmd).
+        // Here we pin the clap-rejection precondition for both the -rn and -rl forms.
+        for form in [
+            vec!["rtk", "grep", "-rn", "fn main", "src"],
+            vec!["rtk", "grep", "-rl", "Tracker", "src"],
+        ] {
+            assert!(
+                Cli::try_parse_from(&form).is_err(),
+                "clap should reject {form:?}, triggering grep recovery"
+            );
         }
     }
 
