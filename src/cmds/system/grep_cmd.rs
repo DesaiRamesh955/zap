@@ -166,6 +166,104 @@ pub fn run(
     Ok(exit_code)
 }
 
+/// Short grep flags that consume the following argument as their value.
+/// (`-A 3`, `-m 5`, etc.) Listed so the value is not mistaken for the pattern.
+/// `-e`/`-f` carry the pattern/file and are deliberately out of scope here.
+const VALUE_FLAGS: &[&str] = &["-A", "-B", "-C", "-m", "-d", "-D", "-e", "-f"];
+
+/// Recover a full `zap`-style argv when the `grep` subcommand was written in the
+/// conventional `grep -flags pattern [path]` order that clap's positional-first
+/// parser rejects (pattern is its first positional).
+///
+/// Returns `Some(new_argv)` with the grep arguments rewritten into clap's
+/// canonical `pattern path extra…` order, or `None` when the command is not a
+/// recoverable `grep` invocation (different subcommand, no pattern, `-e` form).
+/// The returned argv keeps the program name and any global flags untouched.
+pub fn normalize_argv(argv: &[String]) -> Option<Vec<String>> {
+    // The subcommand is the first non-flag token (all global flags are boolean).
+    let sub_idx = argv.iter().skip(1).position(|a| !a.starts_with('-'))? + 1;
+    if argv[sub_idx] != "grep" {
+        return None;
+    }
+    let normalized = normalize_grep_args(&argv[sub_idx + 1..])?;
+    let mut out: Vec<String> = argv[..=sub_idx].to_vec();
+    out.extend(normalized);
+    Some(out)
+}
+
+/// Reorder raw grep arguments into clap's expected `pattern path extra…` order,
+/// translating grep-isms that ripgrep interprets differently.
+/// Returns `None` if no positional pattern can be identified or an `-e`/`-f`
+/// pattern-bearing flag is present (left for clap/fallback to handle).
+fn normalize_grep_args(args: &[String]) -> Option<Vec<String>> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut flags: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--" {
+            // Everything after `--` is a positional, even if it looks like a flag.
+            positionals.extend(args[i + 1..].iter().cloned());
+            break;
+        }
+        if a.len() > 1 && a.starts_with('-') {
+            if VALUE_FLAGS.contains(&a.as_str()) {
+                // `-e`/`-f` carry the pattern/file — out of scope, defer to clap.
+                if a == "-e" || a == "-f" {
+                    return None;
+                }
+                flags.push(a.clone());
+                if let Some(val) = args.get(i + 1) {
+                    flags.push(val.clone());
+                    i += 1;
+                }
+            } else if let Some(translated) = translate_flag(a) {
+                flags.push(translated);
+            }
+            // else: flag intentionally dropped (e.g. -r, -E)
+        } else {
+            positionals.push(a.clone());
+        }
+        i += 1;
+    }
+
+    let pattern = positionals.first()?.clone();
+    let path = positionals.get(1).cloned().unwrap_or_else(|| ".".to_string());
+
+    let mut out = vec![pattern, path];
+    out.extend(flags);
+    out.extend(positionals.into_iter().skip(2)); // extra paths
+    Some(out)
+}
+
+/// Translate a single non-value grep flag into its ripgrep-friendly form.
+/// Returns `None` for flags that must be dropped (rg's defaults already cover
+/// them, or they collide with a different rg meaning).
+fn translate_flag(flag: &str) -> Option<String> {
+    match flag {
+        // rg is recursive by default; rg's -r means --replace.
+        "-r" | "-R" | "--recursive" => None,
+        // rg uses Rust regex (ERE-like) by default; -E collides with rg's --encoding.
+        "-E" | "--extended-regexp" | "-G" | "--basic-regexp" => None,
+        _ => {
+            // Short-flag cluster (e.g. -rn, -rl, -in): drop the recursive letters
+            // so the rest survives without tripping rg's -r/--replace.
+            let body = flag.strip_prefix('-').unwrap_or("");
+            let is_cluster =
+                body.len() > 1 && !body.starts_with('-') && body.chars().all(|c| c.is_ascii_alphabetic());
+            if is_cluster {
+                let kept: String = body.chars().filter(|c| *c != 'r' && *c != 'R').collect();
+                return if kept.is_empty() {
+                    None
+                } else {
+                    Some(format!("-{kept}"))
+                };
+            }
+            Some(flag.to_string())
+        }
+    }
+}
+
 fn has_format_flag(extra_args: &[String]) -> bool {
     extra_args.iter().any(|arg| {
         matches!(
@@ -389,6 +487,118 @@ mod tests {
             );
         }
         // If rg is not installed, skip gracefully (test still passes)
+    }
+
+    // --- argv normalization: flags-before-pattern recovery (issue: grep fallbacks) ---
+
+    #[test]
+    fn test_normalize_flags_before_pattern_puts_pattern_first() {
+        let args = svec(&["-rn", "fn main", "src"]);
+        let out = normalize_grep_args(&args).unwrap();
+        assert_eq!(out[0], "fn main", "pattern must be first positional");
+        assert_eq!(out[1], "src", "path must be second positional");
+    }
+
+    #[test]
+    fn test_normalize_strips_recursive_from_cluster() {
+        // -rn -> -n (rg is recursive by default; rg -r means --replace)
+        let out = normalize_grep_args(&svec(&["-rn", "TODO", "src"])).unwrap();
+        assert!(out.contains(&"-n".to_string()), "cluster -rn should yield -n");
+        assert!(
+            !out.iter().any(|a| a == "-r" || a == "-rn"),
+            "no -r/-rn should reach rg: {out:?}"
+        );
+    }
+
+    #[test]
+    fn test_normalize_rl_cluster_becomes_l() {
+        let out = normalize_grep_args(&svec(&["-rl", "foo", "src"])).unwrap();
+        assert!(out.contains(&"-l".to_string()), "cluster -rl should yield -l");
+        assert!(!out.iter().any(|a| a == "-rl" || a == "-r"));
+    }
+
+    #[test]
+    fn test_normalize_defaults_path_to_dot() {
+        let out = normalize_grep_args(&svec(&["-rn", "TODO"])).unwrap();
+        assert_eq!(out[0], "TODO");
+        assert_eq!(out[1], ".", "missing path must default to '.'");
+    }
+
+    #[test]
+    fn test_normalize_keeps_value_flag_with_its_value() {
+        // -A 3 (after-context) must stay paired and not be mistaken for the pattern
+        let out = normalize_grep_args(&svec(&["-A", "3", "foo", "src"])).unwrap();
+        assert_eq!(out[0], "foo");
+        assert_eq!(out[1], "src");
+        let pos = out.iter().position(|a| a == "-A").expect("-A present");
+        assert_eq!(out[pos + 1], "3", "-A must keep its value");
+    }
+
+    #[test]
+    fn test_normalize_drops_extended_regexp_flag() {
+        // rg uses Rust regex (ERE-like) by default; grep's -E is redundant and
+        // collides with rg's -E (--encoding), so it must be dropped.
+        let out = normalize_grep_args(&svec(&["-E", "a|b", "src"])).unwrap();
+        assert_eq!(out[0], "a|b");
+        assert!(!out.iter().any(|a| a == "-E"), "-E must be dropped: {out:?}");
+    }
+
+    #[test]
+    fn test_normalize_passes_through_normal_flags() {
+        let out = normalize_grep_args(&svec(&["-i", "foo", "src"])).unwrap();
+        assert_eq!(out[0], "foo");
+        assert_eq!(out[1], "src");
+        assert!(out.contains(&"-i".to_string()), "-i must pass through to rg");
+    }
+
+    #[test]
+    fn test_normalize_flag_between_positionals() {
+        // grep pattern -i src  (flag wedged between pattern and path) also fails clap today
+        let out = normalize_grep_args(&svec(&["pattern", "-i", "src"])).unwrap();
+        assert_eq!(out[0], "pattern");
+        assert_eq!(out[1], "src");
+        assert!(out.contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn test_normalize_bails_on_e_flag() {
+        // -e carries the pattern as its value; out of scope, let clap/fallback handle it.
+        assert!(normalize_grep_args(&svec(&["-e", "foo", "src"])).is_none());
+    }
+
+    #[test]
+    fn test_normalize_none_when_no_positional_pattern() {
+        assert!(normalize_grep_args(&svec(&["-rn"])).is_none());
+    }
+
+    #[test]
+    fn test_normalize_argv_finds_grep_subcommand() {
+        let argv = svec(&["zap", "grep", "-rn", "foo", "src"]);
+        let out = normalize_argv(&argv).unwrap();
+        assert_eq!(out[0], "zap");
+        assert_eq!(out[1], "grep");
+        assert_eq!(out[2], "foo");
+        assert_eq!(out[3], "src");
+    }
+
+    #[test]
+    fn test_normalize_argv_preserves_global_flags() {
+        let argv = svec(&["zap", "-v", "grep", "-rn", "foo"]);
+        let out = normalize_argv(&argv).unwrap();
+        assert_eq!(out[0], "zap");
+        assert_eq!(out[1], "-v");
+        assert_eq!(out[2], "grep");
+        assert_eq!(out[3], "foo");
+        assert_eq!(out[4], ".");
+    }
+
+    #[test]
+    fn test_normalize_argv_none_for_non_grep() {
+        assert!(normalize_argv(&svec(&["zap", "git", "status"])).is_none());
+    }
+
+    fn svec(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]

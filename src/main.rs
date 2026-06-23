@@ -1388,6 +1388,15 @@ where
     }
 }
 
+/// Retry parsing as a normalized `grep` invocation when the original parse failed.
+/// Returns `Some(cli)` only when the args are a recoverable flags-first `grep`
+/// command that re-parses cleanly; otherwise `None` so the caller falls back.
+fn recover_grep_argv() -> Option<Cli> {
+    let argv: Vec<String> = std::env::args().collect();
+    let normalized = grep_cmd::normalize_argv(&argv)?;
+    Cli::try_parse_from(&normalized).ok()
+}
+
 fn run_cli() -> Result<i32> {
     // Fire-and-forget telemetry ping (1/day, non-blocking)
     core::telemetry::maybe_ping();
@@ -1398,7 +1407,13 @@ fn run_cli() -> Result<i32> {
             if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
                 e.exit();
             }
-            return run_fallback(e);
+            // Recover the common `grep -flags pattern [path]` form that clap rejects
+            // (its grep pattern is positional-first). Re-parse the normalized argv so
+            // these hit the optimized handler instead of an unfiltered fallback.
+            match recover_grep_argv() {
+                Some(cli) => cli,
+                None => return run_fallback(e),
+            }
         }
     };
 
@@ -2649,6 +2664,31 @@ mod tests {
     fn test_try_parse_valid_git_status() {
         let result = Cli::try_parse_from(["rtk", "git", "status"]);
         assert!(result.is_ok(), "git status should parse successfully");
+    }
+
+    #[test]
+    fn test_grep_flags_first_recovers_via_normalize() {
+        // The conventional `grep -rn pattern path` form is rejected by clap
+        // (pattern is positional-first), then recovered by normalize_argv.
+        let argv: Vec<String> = ["rtk", "grep", "-rn", "fn main", "src"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        assert!(
+            Cli::try_parse_from(&argv).is_err(),
+            "flags-first grep should fail clap's strict parse"
+        );
+
+        let normalized = grep_cmd::normalize_argv(&argv).expect("recoverable grep");
+        let cli = Cli::try_parse_from(&normalized).expect("normalized grep parses");
+        match cli.command {
+            Commands::Grep { pattern, path, .. } => {
+                assert_eq!(pattern, "fn main");
+                assert_eq!(path, "src");
+            }
+            _ => panic!("Expected Grep command"),
+        }
     }
 
     #[test]
