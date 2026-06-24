@@ -333,18 +333,31 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
         ti
     };
 
-    let mut hook_output = json!({
+    // Claude Code only applies `updatedInput` when the hook also returns a
+    // permissionDecision. Omitting it (the previous behavior for any command
+    // without an explicit allow rule) silently drops the rewrite and runs the
+    // raw command — zero savings, the "zap isn't used by default" symptom.
+    //
+    // Choosing the decision:
+    //   - "allow" when an explicit allow rule matched (auto-approve), OR when
+    //     the user is in bypassPermissions mode — they have already opted out
+    //     of every prompt, so emitting "ask" would wrongly re-introduce one.
+    //   - otherwise "ask": the rewrite still applies, but Claude Code keeps its
+    //     least-privilege prompt for the rewritten command.
+    let bypass =
+        v.get("permission_mode").and_then(|m| m.as_str()) == Some("bypassPermissions");
+    let decision = if verdict == PermissionVerdict::Allow || bypass {
+        "allow"
+    } else {
+        "ask"
+    };
+
+    let hook_output = json!({
         "hookEventName": PRE_TOOL_USE_KEY,
+        "permissionDecision": decision,
         "permissionDecisionReason": "Zap auto-rewrite",
         "updatedInput": updated_input
     });
-
-    if verdict == PermissionVerdict::Allow {
-        hook_output
-            .as_object_mut()
-            .unwrap()
-            .insert("permissionDecision".into(), json!("allow"));
-    }
 
     PayloadAction::Rewrite {
         cmd: cmd.to_string(),
@@ -767,8 +780,10 @@ mod tests {
         let hook = &v["hookSpecificOutput"];
 
         assert_eq!(hook["hookEventName"], PRE_TOOL_USE_KEY);
-        // permissionDecision is only set when an explicit allow rule matches;
-        // with default-to-ask semantics (no rules configured), it is absent.
+        // A permissionDecision MUST always be present: Claude Code drops
+        // `updatedInput` without it. With no allow rule the verdict is Default,
+        // which maps to "ask" (rewrite applies, prompt preserved).
+        assert_eq!(hook["permissionDecision"], "ask");
         assert_eq!(hook["permissionDecisionReason"], "Zap auto-rewrite");
         assert!(hook["updatedInput"].is_object());
         assert!(hook["updatedInput"]["command"].is_string());
@@ -778,6 +793,39 @@ mod tests {
     fn test_claude_no_tool_input_passthrough() {
         let input = json!({ "tool_name": "Bash" }).to_string();
         assert!(run_claude_inner(&input).is_none());
+    }
+
+    #[test]
+    fn test_claude_bypass_mode_emits_allow() {
+        // In bypassPermissions the user has opted out of all prompts, so a
+        // rewrite must be auto-allowed — emitting "ask" would force a prompt
+        // despite the mode (the rewrite still applies via updatedInput).
+        let input = json!({
+            "tool_name": "Bash",
+            "permission_mode": "bypassPermissions",
+            "tool_input": { "command": "git status" }
+        })
+        .to_string();
+        let result = run_claude_inner(&input).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(v["hookSpecificOutput"]["updatedInput"]["command"].is_string());
+    }
+
+    #[test]
+    fn test_claude_default_mode_emits_ask() {
+        // Outside bypass and without an allow rule the rewrite still applies,
+        // but Claude Code keeps its least-privilege prompt (permissionDecision
+        // "ask"), so the rewritten command is shown for approval.
+        let input = json!({
+            "tool_name": "Bash",
+            "permission_mode": "default",
+            "tool_input": { "command": "git status" }
+        })
+        .to_string();
+        let result = run_claude_inner(&input).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "ask");
     }
 
     // --- Cursor handler ---
