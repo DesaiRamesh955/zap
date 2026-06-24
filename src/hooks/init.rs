@@ -114,91 +114,91 @@ fn print_dry_run_footer() {
 }
 
 // Legacy full instructions for backward compatibility (--claude-md mode)
-const RTK_INSTRUCTIONS: &str = r##"<!-- rtk-instructions v2 -->
-# RTK (Rust Token Killer) - Token-Optimized Commands
+const RTK_INSTRUCTIONS: &str = r##"<!-- zap-instructions v2 -->
+# Zap - Token-Optimized Commands
 
 ## Golden Rule
 
-**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
+**Always prefix commands with `zap`**. If Zap has a dedicated filter, it uses it. If not, it passes through unchanged. This means Zap is always safe to use.
 
-**Important**: Even in command chains with `&&`, use `rtk`:
+**Important**: Even in command chains with `&&`, use `zap`:
 ```bash
 # ❌ Wrong
 git add . && git commit -m "msg" && git push
 
 # ✅ Correct
-rtk git add . && rtk git commit -m "msg" && rtk git push
+zap git add . && zap git commit -m "msg" && zap git push
 ```
 
-## RTK Commands by Workflow
+## Zap Commands by Workflow
 
 ### Build & Compile (80-90% savings)
 ```bash
-rtk cargo build         # Cargo build output
-rtk cargo check         # Cargo check output
-rtk cargo clippy        # Clippy warnings grouped by file (80%)
-rtk tsc                 # TypeScript errors grouped by file/code (83%)
-rtk lint                # ESLint/Biome violations grouped (84%)
-rtk prettier --check    # Files needing format only (70%)
-rtk next build          # Next.js build with route metrics (87%)
+zap cargo build         # Cargo build output
+zap cargo check         # Cargo check output
+zap cargo clippy        # Clippy warnings grouped by file (80%)
+zap tsc                 # TypeScript errors grouped by file/code (83%)
+zap lint                # ESLint/Biome violations grouped (84%)
+zap prettier --check    # Files needing format only (70%)
+zap next build          # Next.js build with route metrics (87%)
 ```
 
 ### Test (60-99% savings)
 ```bash
-rtk cargo test          # Cargo test failures only (90%)
-rtk go test             # Go test failures only (90%)
-rtk jest                # Jest failures only (99.5%)
-rtk vitest              # Vitest failures only (99.5%)
-rtk playwright test     # Playwright failures only (94%)
-rtk pytest              # Python test failures only (90%)
-rtk rake test           # Ruby test failures only (90%)
-rtk rspec               # RSpec test failures only (60%)
-rtk test <cmd>          # Generic test wrapper - failures only
+zap cargo test          # Cargo test failures only (90%)
+zap go test             # Go test failures only (90%)
+zap jest                # Jest failures only (99.5%)
+zap vitest              # Vitest failures only (99.5%)
+zap playwright test     # Playwright failures only (94%)
+zap pytest              # Python test failures only (90%)
+zap rake test           # Ruby test failures only (90%)
+zap rspec               # RSpec test failures only (60%)
+zap test <cmd>          # Generic test wrapper - failures only
 ```
 
 ### Git (59-80% savings)
 ```bash
-rtk git status          # Compact status
-rtk git log             # Compact log (works with all git flags)
-rtk git diff            # Compact diff (80%)
-rtk git show            # Compact show (80%)
-rtk git add             # Ultra-compact confirmations (59%)
-rtk git commit          # Ultra-compact confirmations (59%)
-rtk git push            # Ultra-compact confirmations
-rtk git pull            # Ultra-compact confirmations
-rtk git branch          # Compact branch list
-rtk git fetch           # Compact fetch
-rtk git stash           # Compact stash
-rtk git worktree        # Compact worktree
+zap git status          # Compact status
+zap git log             # Compact log (works with all git flags)
+zap git diff            # Compact diff (80%)
+zap git show            # Compact show (80%)
+zap git add             # Ultra-compact confirmations (59%)
+zap git commit          # Ultra-compact confirmations (59%)
+zap git push            # Ultra-compact confirmations
+zap git pull            # Ultra-compact confirmations
+zap git branch          # Compact branch list
+zap git fetch           # Compact fetch
+zap git stash           # Compact stash
+zap git worktree        # Compact worktree
 ```
 
 Note: Git passthrough works for ALL subcommands, even those not explicitly listed.
 
 ### GitHub (26-87% savings)
 ```bash
-rtk gh pr view <num>    # Compact PR view (87%)
-rtk gh pr checks        # Compact PR checks (79%)
-rtk gh run list         # Compact workflow runs (82%)
-rtk gh issue list       # Compact issue list (80%)
-rtk gh api              # Compact API responses (26%)
+zap gh pr view <num>    # Compact PR view (87%)
+zap gh pr checks        # Compact PR checks (79%)
+zap gh run list         # Compact workflow runs (82%)
+zap gh issue list       # Compact issue list (80%)
+zap gh api              # Compact API responses (26%)
 ```
 
 ### JavaScript/TypeScript Tooling (70-90% savings)
 ```bash
-rtk pnpm list           # Compact dependency tree (70%)
-rtk pnpm outdated       # Compact outdated packages (80%)
-rtk pnpm install        # Compact install output (90%)
-rtk npm run <script>    # Compact npm script output
-rtk npx <cmd>           # Compact npx command output
-rtk prisma              # Prisma without ASCII art (88%)
+zap pnpm list           # Compact dependency tree (70%)
+zap pnpm outdated       # Compact outdated packages (80%)
+zap pnpm install        # Compact install output (90%)
+zap npm run <script>    # Compact npm script output
+zap npx <cmd>           # Compact npx command output
+zap prisma              # Prisma without ASCII art (88%)
 ```
 
 ### Files & Search (60-75% savings)
 ```bash
-rtk ls <path>           # Tree format, compact (65%)
-rtk read <file>         # Code reading with filtering (60%)
-rtk grep <pattern>      # Search grouped by file (75%). Format flags (-c, -l, -L, -o, -Z) run raw.
-rtk find <pattern>      # Find grouped by directory (70%)
+zap ls <path>           # Tree format, compact (65%)
+zap read <file>         # Code reading with filtering (60%)
+zap grep <pattern>      # Search grouped by file (75%). Format flags (-c, -l, -L, -o, -Z) run raw.
+zap find <pattern>      # Find grouped by directory (70%)
 ```
 
 ### Research protocol — read less, drill in
@@ -214,38 +214,38 @@ zap read <file> --lines A-B       # exact line range, e.g. 40-80 (lossless)
 
 ### Analysis & Debug (70-90% savings)
 ```bash
-rtk err <cmd>           # Filter errors only from any command
-rtk log <file>          # Deduplicated logs with counts
-rtk json <file>         # JSON structure without values
-rtk deps                # Dependency overview
-rtk env                 # Environment variables compact
-rtk summary <cmd>       # Smart summary of command output
-rtk diff                # Ultra-compact diffs
+zap err <cmd>           # Filter errors only from any command
+zap log <file>          # Deduplicated logs with counts
+zap json <file>         # JSON structure without values
+zap deps                # Dependency overview
+zap env                 # Environment variables compact
+zap summary <cmd>       # Smart summary of command output
+zap diff                # Ultra-compact diffs
 ```
 
 ### Infrastructure (85% savings)
 ```bash
-rtk docker ps           # Compact container list
-rtk docker images       # Compact image list
-rtk docker logs <c>     # Deduplicated logs
-rtk kubectl get         # Compact resource list
-rtk kubectl logs        # Deduplicated pod logs
+zap docker ps           # Compact container list
+zap docker images       # Compact image list
+zap docker logs <c>     # Deduplicated logs
+zap kubectl get         # Compact resource list
+zap kubectl logs        # Deduplicated pod logs
 ```
 
 ### Network (65-70% savings)
 ```bash
-rtk curl <url>          # Compact HTTP responses (70%)
-rtk wget <url>          # Compact download output (65%)
+zap curl <url>          # Compact HTTP responses (70%)
+zap wget <url>          # Compact download output (65%)
 ```
 
 ### Meta Commands
 ```bash
-rtk gain                # View token savings statistics
-rtk gain --history      # View command history with savings
-rtk discover            # Analyze Claude Code sessions for missed RTK usage
-rtk proxy <cmd>         # Run command without filtering (for debugging)
-rtk init                # Add RTK instructions to CLAUDE.md
-rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
+zap gain                # View token savings statistics
+zap gain --history      # View command history with savings
+zap discover            # Analyze Claude Code sessions for missed Zap usage
+zap proxy <cmd>         # Run command without filtering (for debugging)
+zap init                # Add Zap instructions to CLAUDE.md
+zap init --global       # Add Zap to ~/.claude/CLAUDE.md
 ```
 
 ## Token Savings Overview
@@ -262,7 +262,7 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 | Network | curl, wget | 65-70% |
 
 Overall average: **60-90% token reduction** on common development operations.
-<!-- /rtk-instructions -->
+<!-- /zap-instructions -->
 "##;
 
 /// Main entry point for `zap init`
@@ -1123,7 +1123,7 @@ fn run_default_mode(
 
     // 4. Print success message (skip in dry-run)
     if !dry_run {
-        println!("\nRTK hook registered (global).\n");
+        println!("\nZap hook registered (global).\n");
         println!("  Command:   {}", CLAUDE_HOOK_COMMAND);
         println!("  ZAP.md:    {} (10 lines)", rtk_md_path.display());
         if let Some(path) = &opencode_plugin_path {
@@ -1410,7 +1410,7 @@ fn run_hook_only_mode(
     };
 
     if !dry_run {
-        println!("\nRTK hook registered (hook-only mode).\n");
+        println!("\nZap hook registered (hook-only mode).\n");
         println!("  Command: {}", CLAUDE_HOOK_COMMAND);
         if let Some(path) = &opencode_plugin_path {
             println!("  OpenCode: {}", path.display());
@@ -3936,21 +3936,21 @@ mod tests {
     #[test]
     fn test_init_mentions_all_top_level_commands() {
         for cmd in [
-            "rtk cargo",
-            "rtk gh",
-            "rtk vitest",
-            "rtk tsc",
-            "rtk lint",
-            "rtk prettier",
-            "rtk next",
-            "rtk playwright",
-            "rtk prisma",
-            "rtk pnpm",
-            "rtk npm",
-            "rtk curl",
-            "rtk git",
-            "rtk docker",
-            "rtk kubectl",
+            "zap cargo",
+            "zap gh",
+            "zap vitest",
+            "zap tsc",
+            "zap lint",
+            "zap prettier",
+            "zap next",
+            "zap playwright",
+            "zap prisma",
+            "zap pnpm",
+            "zap npm",
+            "zap curl",
+            "zap git",
+            "zap docker",
+            "zap kubectl",
         ] {
             assert!(
                 RTK_INSTRUCTIONS.contains(cmd),
@@ -4045,7 +4045,7 @@ mod tests {
     fn test_claude_md_mode_creates_full_injection() {
         // Just verify RTK_INSTRUCTIONS constant has the right content
         assert!(RTK_INSTRUCTIONS.contains(RTK_BLOCK_START));
-        assert!(RTK_INSTRUCTIONS.contains("rtk cargo test"));
+        assert!(RTK_INSTRUCTIONS.contains("zap cargo test"));
         assert!(RTK_INSTRUCTIONS.contains(RTK_BLOCK_END));
         assert!(RTK_INSTRUCTIONS.len() > 4000);
     }
@@ -4071,7 +4071,7 @@ mod tests {
         let (content, action) = upsert_rtk_block(&input, RTK_INSTRUCTIONS);
         assert_eq!(action, RtkBlockUpsert::Updated);
         assert!(!content.contains("OLD RTK CONTENT"));
-        assert!(content.contains("rtk cargo test")); // from current RTK_INSTRUCTIONS
+        assert!(content.contains("zap cargo test")); // from current RTK_INSTRUCTIONS
         assert!(content.contains("# Team instructions"));
         assert!(content.contains("More notes"));
     }

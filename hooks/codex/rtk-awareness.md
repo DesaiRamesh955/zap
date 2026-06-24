@@ -1,32 +1,32 @@
-# RTK - Rust Token Killer (Codex CLI)
+# Zap — Token-Optimized CLI Proxy (Codex CLI)
 
 **Usage**: Token-optimized CLI proxy for shell commands.
 
 ## Rule
 
-Always prefix shell commands with `rtk`.
+Always prefix shell commands with `zap`.
 
 Examples:
 
 ```bash
-rtk git status
-rtk cargo test
-rtk npm run build
-rtk pytest -q
+zap git status
+zap cargo test
+zap npm run build
+zap pytest -q
 ```
 
 ## Meta Commands
 
 ```bash
-rtk gain            # Token savings analytics
-rtk gain --history  # Recent command savings history
-rtk proxy <cmd>     # Run raw command without filtering
+zap gain            # Token savings analytics
+zap gain --history  # Recent command savings history
+zap proxy <cmd>     # Run raw command without filtering
 ```
 
 ## Verification
 
 ```bash
-rtk --version
-rtk gain
-which rtk
+zap --version
+zap gain
+which zap
 ```
