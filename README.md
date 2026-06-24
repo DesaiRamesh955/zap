@@ -175,6 +175,27 @@ filtered transparently — no need to type `zap` yourself.
 Hooks are also available for Cursor, Gemini CLI, Copilot, Windsurf, Cline, and
 more. Run `zap init --help` for the full list.
 
+### Using the hook inside VS Code / GUI editors
+
+The hook runs `zap` by name — and so do the commands it rewrites (`git status` →
+`zap git status`). That works in a terminal, but **GUI-launched editors (the VS Code
+extension) start with a minimal `PATH` that doesn't include `~/.cargo/bin`**, so the
+editor can't find `zap` and rewriting silently does nothing. (macOS is hit hardest:
+GUI subprocesses don't source `~/.zshrc`.)
+
+Fix it once per machine by symlinking `zap` into `/usr/local/bin` — the one directory
+that **is** on the default PATH for GUI apps on both Linux and macOS:
+
+```bash
+sudo ln -sf "$(command -v zap)" /usr/local/bin/zap
+```
+
+> **macOS (Apple Silicon):** if `/usr/local/bin` is missing, create it first:
+> `sudo mkdir -p /usr/local/bin && sudo ln -sf "$(command -v zap)" /usr/local/bin/zap`
+
+Then reload the editor window. To verify, have the assistant run `command -v zap` —
+it should print `/usr/local/bin/zap`.
+
 ---
 
 ## Check Your Savings
